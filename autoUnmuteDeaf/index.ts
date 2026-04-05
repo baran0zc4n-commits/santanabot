@@ -9,7 +9,6 @@ import definePlugin, { OptionType } from "@utils/types";
 import { FluxDispatcher, UserStore } from "@webpack/common";
 
 let enabled = false;
-let origDispatch: typeof FluxDispatcher.dispatch | null = null;
 
 function stripServerFlags(action: any) {
     if (!enabled || action?.type !== "VOICE_STATE_UPDATES") return;
@@ -59,11 +58,11 @@ export default definePlugin({
             replacement: [
                 {
                     match: /e\.setSelfMute\(n\),/g,
-                    replace: 'e.setSelfMute(Vencord.Settings.plugins["AutoUnmuteDeaf"].autoUnmute?false:n),'
+                    replace: 'e.setSelfMute(Vencord.Settings.plugins["AutoUnmuteDeaf"].enabled&&Vencord.Settings.plugins["AutoUnmuteDeaf"].autoUnmute?false:n),'
                 },
                 {
                     match: /e\.setSelfDeaf\(t\.deaf\)/g,
-                    replace: 'e.setSelfDeaf(Vencord.Settings.plugins["AutoUnmuteDeaf"].autoUndeaf?false:t.deaf)'
+                    replace: 'e.setSelfDeaf(Vencord.Settings.plugins["AutoUnmuteDeaf"].enabled&&Vencord.Settings.plugins["AutoUnmuteDeaf"].autoUndeaf?false:t.deaf)'
                 }
             ]
         }
@@ -75,7 +74,7 @@ export default definePlugin({
         // Wrap FluxDispatcher.dispatch to strip server mute/deaf flags
         // from voice state events BEFORE stores process them.
         // This removes the mute/deaf icons from the UI.
-        origDispatch = FluxDispatcher.dispatch;
+        const origDispatch = FluxDispatcher.dispatch;
         const boundOrig = origDispatch.bind(FluxDispatcher);
 
         (FluxDispatcher as any).dispatch = function (action: any) {
@@ -86,9 +85,9 @@ export default definePlugin({
 
     stop() {
         enabled = false;
-        if (origDispatch) {
-            (FluxDispatcher as any).dispatch = origDispatch;
-            origDispatch = null;
-        }
+        // Do NOT restore origDispatch here. The wrapper becomes a
+        // transparent passthrough when enabled=false. Restoring would
+        // silently remove any dispatch wrappers installed by other
+        // plugins after our start().
     }
 });
