@@ -9,6 +9,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { FluxDispatcher, UserStore } from "@webpack/common";
 
 let enabled = false;
+let patched = false;
 
 function stripServerFlags(action: any) {
     if (!enabled || action?.type !== "VOICE_STATE_UPDATES") return;
@@ -71,16 +72,19 @@ export default definePlugin({
     start() {
         enabled = true;
 
-        // Wrap FluxDispatcher.dispatch to strip server mute/deaf flags
-        // from voice state events BEFORE stores process them.
-        // This removes the mute/deaf icons from the UI.
-        const origDispatch = FluxDispatcher.dispatch;
-        const boundOrig = origDispatch.bind(FluxDispatcher);
+        // Only wrap dispatch once. The enabled flag controls whether
+        // stripServerFlags actually modifies anything, so repeated
+        // start/stop cycles don't accumulate wrapper layers.
+        if (!patched) {
+            patched = true;
+            const origDispatch = FluxDispatcher.dispatch;
+            const boundOrig = origDispatch.bind(FluxDispatcher);
 
-        (FluxDispatcher as any).dispatch = function (action: any) {
-            stripServerFlags(action);
-            return boundOrig(action);
-        };
+            (FluxDispatcher as any).dispatch = function (action: any) {
+                stripServerFlags(action);
+                return boundOrig(action);
+            };
+        }
     },
 
     stop() {
