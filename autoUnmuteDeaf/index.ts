@@ -1,0 +1,97 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2024 santanabot
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+import definePlugin, { OptionType } from "@utils/types";
+import { FluxDispatcher, UserStore } from "@webpack/common";
+
+let enabled = false;
+let patched = false;
+
+function stripServerFlags(action: any) {
+    if (!enabled || action?.type !== "VOICE_STATE_UPDATES") return;
+
+    try {
+        const myId = UserStore.getCurrentUser()?.id;
+        if (!myId || !Array.isArray(action.voiceStates)) return;
+
+        for (const state of action.voiceStates) {
+            if (state.userId === myId) {
+                if (Vencord.Settings.plugins.AutoUnmuteDeaf.autoUnmute) state.mute = false;
+                if (Vencord.Settings.plugins.AutoUnmuteDeaf.autoUndeaf) state.deaf = false;
+            }
+        }
+    } catch (e) {
+        console.error("[AutoUnmuteDeaf]", e);
+    }
+}
+
+export default definePlugin({
+    name: "AutoUnmuteDeaf",
+    description: "Sunucu tarafindan atilan mute ve deaf'leri otomatik olarak kaldirir",
+    authors: [{
+        name: "santanabot",
+        id: 0n
+    }],
+
+    options: {
+        autoUnmute: {
+            description: "Sunucu mute'unu otomatik olarak kaldir",
+            type: OptionType.BOOLEAN,
+            default: true,
+        },
+        autoUndeaf: {
+            description: "Sunucu deaf'ini otomatik olarak kaldir",
+            type: OptionType.BOOLEAN,
+            default: true,
+        }
+    },
+
+    // Patch the voice connection module using the exact same pattern
+    // as FakeVoiceOptions (proven to work). Uses the exact minified
+    // variable names Discord uses: e.setSelfMute(n) and e.setSelfDeaf(t.deaf)
+    patches: [
+        {
+            find: "e.setSelfMute(n)",
+            replacement: [
+                {
+                    match: /e\.setSelfMute\(n\),/g,
+                    replace: 'e.setSelfMute(Vencord.Settings.plugins["AutoUnmuteDeaf"].enabled&&Vencord.Settings.plugins["AutoUnmuteDeaf"].autoUnmute?false:n),'
+                },
+                {
+                    match: /e\.setSelfDeaf\(t\.deaf\)/g,
+                    replace: 'e.setSelfDeaf(Vencord.Settings.plugins["AutoUnmuteDeaf"].enabled&&Vencord.Settings.plugins["AutoUnmuteDeaf"].autoUndeaf?false:t.deaf)'
+                }
+            ]
+        }
+    ],
+
+    start() {
+        enabled = true;
+
+        // Only wrap dispatch once. The enabled flag controls whether
+        // stripServerFlags actually modifies anything, so repeated
+        // start/stop cycles don't accumulate wrapper layers.
+        if (!patched) {
+            patched = true;
+            const origDispatch = FluxDispatcher.dispatch;
+            const boundOrig = origDispatch.bind(FluxDispatcher);
+
+            (FluxDispatcher as any).dispatch = function (action: any) {
+                stripServerFlags(action);
+                return boundOrig(action);
+            };
+        }
+    },
+
+    stop() {
+        enabled = false;
+        // Do NOT restore origDispatch here. The wrapper becomes a
+        // transparent passthrough when enabled=false. Restoring would
+        // silently remove any dispatch wrappers installed by other
+        // plugins after our start().
+    }
+});
