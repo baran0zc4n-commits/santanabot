@@ -11,25 +11,26 @@ import { FluxDispatcher, UserStore } from "@webpack/common";
 
 const settings = definePluginSettings({
     autoUnmute: {
-        description: "Sunucu mute'unu otomatik olarak kaldır",
+        description: "Sunucu mute'unu otomatik olarak kaldir",
         type: OptionType.BOOLEAN,
         default: true,
     },
     autoUndeaf: {
-        description: "Sunucu deaf'ini otomatik olarak kaldır",
+        description: "Sunucu deaf'ini otomatik olarak kaldir",
         type: OptionType.BOOLEAN,
         default: true,
     }
 });
 
 let enabled = false;
+let origDispatch: typeof FluxDispatcher.dispatch | null = null;
 
-function interceptor(action: any) {
-    if (!enabled) return;
+function stripServerFlags(action: any) {
+    if (!enabled || action?.type !== "VOICE_STATE_UPDATES") return;
 
-    if (action.type === "VOICE_STATE_UPDATES") {
+    try {
         const myId = UserStore.getCurrentUser()?.id;
-        if (!myId || !action.voiceStates) return;
+        if (!myId || !Array.isArray(action.voiceStates)) return;
 
         for (const state of action.voiceStates) {
             if (state.userId === myId) {
@@ -37,6 +38,8 @@ function interceptor(action: any) {
                 if (settings.store.autoUndeaf) state.deaf = false;
             }
         }
+    } catch (e) {
+        console.error("[AutoUnmuteDeaf]", e);
     }
 }
 
@@ -51,10 +54,24 @@ export default definePlugin({
 
     start() {
         enabled = true;
-        (FluxDispatcher as any).addInterceptor(interceptor);
+
+        // Wrap FluxDispatcher.dispatch to modify voice state events
+        // BEFORE any stores (like VoiceStateStore) process them.
+        // This prevents the client from ever seeing server mute/deaf flags.
+        origDispatch = FluxDispatcher.dispatch;
+        const boundOrig = origDispatch.bind(FluxDispatcher);
+
+        (FluxDispatcher as any).dispatch = function (action: any) {
+            stripServerFlags(action);
+            return boundOrig(action);
+        };
     },
 
     stop() {
         enabled = false;
+        if (origDispatch) {
+            (FluxDispatcher as any).dispatch = origDispatch;
+            origDispatch = null;
+        }
     }
 });

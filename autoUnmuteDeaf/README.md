@@ -4,7 +4,9 @@ Sunucu tarafindan atilan **mute** ve **deaf** islemlerini otomatik olarak kaldir
 
 ## Nasil Calisir?
 
-Plugin, Discord'un `VOICE_STATE_UPDATES` event'lerini yakalar ve sunucu tarafindan uygulanan mute/deaf flag'lerini istemci tarafinda kaldirir. Bu sayede sunucu sizi mute veya deaf yapsa bile ses iletimi ve alimi devam eder.
+Plugin, `FluxDispatcher.dispatch` metodunu sarmalayarak `VOICE_STATE_UPDATES` event'lerini store'lara ulasmadan ONCE yakalar ve sunucu tarafindan uygulanan mute/deaf flag'lerini kaldirir. Bu sayede VoiceStateStore sunucu mute/deaf durumunu hic gormez ve istemci normal sekilde calismaya devam eder.
+
+**Not:** Sunucu deaf bypass'i kesinlikle calisir (sunucu sesi gondermeye devam eder). Sunucu mute bypass'i ise Discord'un sunucu tarafinda ses paketlerini engelleyip engellememesine baglidir.
 
 ## Ayarlar
 
