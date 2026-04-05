@@ -52,6 +52,46 @@ export default definePlugin({
     }],
     settings,
 
+    // Patch the voice connection module to prevent the media engine
+    // from actually muting/deafening when server mute/deaf is applied.
+    // This is needed because the voice WebSocket may signal mute
+    // independently of Flux, directly to the media engine.
+    patches: [
+        {
+            find: ".setSelfMute(",
+            replacement: [
+                {
+                    // Intercept setSelfMute calls — when our plugin is
+                    // enabled, always pass false to keep mic transmitting
+                    match: /\.setSelfMute\((\w+)\)/,
+                    replace: '.setSelfMute($self.filterMute($1))'
+                },
+                {
+                    // Intercept setSelfDeaf calls — when our plugin is
+                    // enabled, always pass false to keep audio receiving
+                    match: /\.setSelfDeaf\((\w+(?:\.\w+)?)\)/,
+                    replace: '.setSelfDeaf($self.filterDeaf($1))'
+                }
+            ]
+        }
+    ],
+
+    filterMute(val: boolean) {
+        if (!enabled || !settings.store.autoUnmute) return val;
+        // Always return false to prevent any mute from being applied.
+        // The dispatch wrapper already strips server mute from the
+        // voice state, so selfMute clicks won't reach here as true
+        // unless the user actually clicked mute themselves.
+        // However, since server mute also flows through setSelfMute,
+        // we must block it here too.
+        return false;
+    },
+
+    filterDeaf(val: boolean) {
+        if (!enabled || !settings.store.autoUndeaf) return val;
+        return false;
+    },
+
     start() {
         enabled = true;
 
