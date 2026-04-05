@@ -5,22 +5,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { definePluginSettings } from "@api/Settings";
 import definePlugin, { OptionType } from "@utils/types";
 import { FluxDispatcher, UserStore } from "@webpack/common";
-
-const settings = definePluginSettings({
-    autoUnmute: {
-        description: "Sunucu mute'unu otomatik olarak kaldir",
-        type: OptionType.BOOLEAN,
-        default: true,
-    },
-    autoUndeaf: {
-        description: "Sunucu deaf'ini otomatik olarak kaldir",
-        type: OptionType.BOOLEAN,
-        default: true,
-    }
-});
 
 let enabled = false;
 let origDispatch: typeof FluxDispatcher.dispatch | null = null;
@@ -34,8 +20,8 @@ function stripServerFlags(action: any) {
 
         for (const state of action.voiceStates) {
             if (state.userId === myId) {
-                if (settings.store.autoUnmute) state.mute = false;
-                if (settings.store.autoUndeaf) state.deaf = false;
+                if (Vencord.Settings.plugins.AutoUnmuteDeaf.autoUnmute) state.mute = false;
+                if (Vencord.Settings.plugins.AutoUnmuteDeaf.autoUndeaf) state.deaf = false;
             }
         }
     } catch (e) {
@@ -50,54 +36,45 @@ export default definePlugin({
         name: "santanabot",
         id: 0n
     }],
-    settings,
 
-    // Patch the voice connection module to prevent the media engine
-    // from actually muting/deafening when server mute/deaf is applied.
-    // This is needed because the voice WebSocket may signal mute
-    // independently of Flux, directly to the media engine.
+    options: {
+        autoUnmute: {
+            description: "Sunucu mute'unu otomatik olarak kaldir",
+            type: OptionType.BOOLEAN,
+            default: true,
+        },
+        autoUndeaf: {
+            description: "Sunucu deaf'ini otomatik olarak kaldir",
+            type: OptionType.BOOLEAN,
+            default: true,
+        }
+    },
+
+    // Patch the voice connection module using the exact same pattern
+    // as FakeVoiceOptions (proven to work). Uses the exact minified
+    // variable names Discord uses: e.setSelfMute(n) and e.setSelfDeaf(t.deaf)
     patches: [
         {
-            find: ".setSelfMute(",
+            find: "e.setSelfMute(n)",
             replacement: [
                 {
-                    // Intercept setSelfMute calls — when our plugin is
-                    // enabled, always pass false to keep mic transmitting
-                    match: /\.setSelfMute\((\w+)\)/,
-                    replace: '.setSelfMute($self.filterMute($1))'
+                    match: /e\.setSelfMute\(n\),/g,
+                    replace: 'e.setSelfMute(Vencord.Settings.plugins["AutoUnmuteDeaf"].autoUnmute?false:n),'
                 },
                 {
-                    // Intercept setSelfDeaf calls — when our plugin is
-                    // enabled, always pass false to keep audio receiving
-                    match: /\.setSelfDeaf\((\w+(?:\.\w+)?)\)/,
-                    replace: '.setSelfDeaf($self.filterDeaf($1))'
+                    match: /e\.setSelfDeaf\(t\.deaf\)/g,
+                    replace: 'e.setSelfDeaf(Vencord.Settings.plugins["AutoUnmuteDeaf"].autoUndeaf?false:t.deaf)'
                 }
             ]
         }
     ],
 
-    filterMute(val: boolean) {
-        if (!enabled || !settings.store.autoUnmute) return val;
-        // Always return false to prevent any mute from being applied.
-        // The dispatch wrapper already strips server mute from the
-        // voice state, so selfMute clicks won't reach here as true
-        // unless the user actually clicked mute themselves.
-        // However, since server mute also flows through setSelfMute,
-        // we must block it here too.
-        return false;
-    },
-
-    filterDeaf(val: boolean) {
-        if (!enabled || !settings.store.autoUndeaf) return val;
-        return false;
-    },
-
     start() {
         enabled = true;
 
-        // Wrap FluxDispatcher.dispatch to modify voice state events
-        // BEFORE any stores (like VoiceStateStore) process them.
-        // This prevents the client from ever seeing server mute/deaf flags.
+        // Wrap FluxDispatcher.dispatch to strip server mute/deaf flags
+        // from voice state events BEFORE stores process them.
+        // This removes the mute/deaf icons from the UI.
         origDispatch = FluxDispatcher.dispatch;
         const boundOrig = origDispatch.bind(FluxDispatcher);
 
